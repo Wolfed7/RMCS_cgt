@@ -10,9 +10,13 @@ int retCode = 0;
 // јссемблерна€ вставка, выполн€юща€ функцию IV уровн€ –√«.
 void asm_cpuid(int regs[4], int func)
 {
-   int ieax, iebx, iecx, iedx;
+   int ieax = regs[0], iebx = regs[1], iecx = regs[2], iedx = regs[3];
    _asm
    {
+      mov ebx, iebx
+      mov ecx, iecx
+      mov edx, iedx
+
 	   mov eax, func
 	   cpuid
 	   mov ieax, eax
@@ -29,7 +33,7 @@ void asm_cpuid(int regs[4], int func)
 // ѕроверка возможности использовани€ cpuid на данном процессоре.
 void can_we_use_cpuid(int &no_cpuid)
 {
-   int ret;
+   int retval;
    _asm
    {
       pushfd    ; —охранить EFLAGS в стек
@@ -51,12 +55,12 @@ void can_we_use_cpuid(int &no_cpuid)
       jne YES_CPUID        ; ≈сли есть изменение, то CPUID поддерживаетс€
 
       mov eax, 1h
-      mov ret, eax
+      mov retval, eax
 
       YES_CPUID:
    }
 
-   no_cpuid = ret;
+   no_cpuid = retval;
 }
 
 extern "C" _declspec(dllexport) int Information(char *InfoString)
@@ -109,63 +113,40 @@ extern "C" _declspec(dllexport) int Information(char *InfoString)
    // ѕолучение размера  ЁЎа третьего уровн€ дл€ процессоров компании Intel.
    if (strcmp(manufacturerID, "GenuineIntel") == 0)
    {
-	  // ƒескрипторы, относ€щиес€ к  ЁЎу третьего уровн€.
-	  int return_descriptors[] = 
-	  { 
-		  0x22, 0x23, 0x25, 0x29, 0x46, 0x47,
-        0x49, 0x4A, 0x4B, 0x4C, 0x4D, 0xD0,
-        0xD1, 0xD2, 0xD6, 0xD7, 0xD8, 0xDC,
-        0xDD, 0xDE, 0xE2, 0xE3, 0xE4, 0xEA,
-        0xEB, 0xEC
-	  };
+      for (size_t i = 0; i < 4; i++)
+         CPUInfo[i] &= 0x0;
+    
+      int safetyExit = 100;
+      for (int i = 0; i < safetyExit; i++)
+      {
+         CPUInfo[2] = i;
+         asm_cpuid(CPUInfo, 0x4);
 
-     // –азмер  ЁЎа третьего уровн€ в килобайтах в соответствии с дескрипторами.
-	  int cache_sizes[] = 
-     {
-        512, 1024, 2048, 4096, 4096, 8192,
-        4096, 6144, 8192, 12288, 16384, 512,
-        1024, 2048, 1024, 2048, 4096, 1536,
-        3072, 6144, 2048, 4096, 8192, 12288,
-        18432, 24576
-     };
+         FILE *d;
+         fopen_s(&d, "debug.dat", "a");
+         for (size_t j = 0; j < 4; j++)
+            fprintf_s(d, "%x\n", CPUInfo[j]);
+         fprintf_s(d, "\n");
 
-     for (size_t i = 0; i < 4; i++)
-        CPUInfo[i] &= 0x0;
+         // EAX[4:0] возвращает 0, если  ЁЎей больше нет.
+         if ((CPUInfo[0] & 0x1f) == 0) // EAX[4:0]
+            break;
 
-     asm_cpuid(CPUInfo, 0x2);
+         //  ЁЎ не третьего уровн€ нам не интересен.
+         if ((CPUInfo[0] & 0xe0) != 3) // EAX[7:5]
+            continue;
 
-     for (size_t i = 0; i < 4; i++)
-     {
-        for (size_t j = 0; j < 26; j++)
-        {
-           if ((CPUInfo[i] >> 24 & 0xff) == return_descriptors[j])
-           {
-              memcpy(InfoString + sizeof(WORD), &cache_sizes[j], sizeof(int));
-              return retCode;
-           }
+         int L3CacheSize =
+            ((CPUInfo[1] & 0xfff) + 1)         // Line size + 1
+            * ((CPUInfo[1] & 0x3ff000) + 1)    // Partitions + 1
+            * ((CPUInfo[1] & 0xffc00000) + 1)  // Ways + 1
+            * (CPUInfo[2] + 1);                // Sets + 1
 
-           if ((CPUInfo[i] >> 16 & 0xff) == return_descriptors[j])
-           {
-              memcpy(InfoString + sizeof(WORD), &cache_sizes[j], sizeof(int));
-              return retCode;
-           }
+         memcpy(InfoString + sizeof(WORD), &L3CacheSize, sizeof(int));
+      }
 
-           if ((CPUInfo[i] >> 8 & 0xff) == return_descriptors[j])
-           {
-              memcpy(InfoString + sizeof(WORD), &cache_sizes[j], sizeof(int));
-              return retCode;
-           }
-
-           if ((CPUInfo[i] & 0xff) == return_descriptors[j])
-           {
-              memcpy(InfoString + sizeof(WORD), &cache_sizes[j], sizeof(int));
-              return retCode;
-           }
-        }
-
-        // »нформаци€ о  ЁЎе не найдена.
-        return retCode == -1 ? -3 : -2;
-     }
+      // »нформаци€ о  ЁЎе не найдена.
+      return retCode == -1 ? -3 : -2;
    }
    // ѕолучение размера  ЁЎа третьего уровн€ дл€ процессоров компании AMD.
    else if (strcmp(manufacturerID, "AuthenticAMD") == 0)
