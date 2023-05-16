@@ -109,7 +109,6 @@ extern "C" _declspec(dllexport) int Information(char *InfoString)
    memcpy(manufacturerID + 4, CPUInfo + 3, sizeof(int));
    memcpy(manufacturerID + 8, CPUInfo + 2, sizeof(int));
 
-
    // Получение размера КЭШа третьего уровня для процессоров компании Intel.
    if (strcmp(manufacturerID, "GenuineIntel") == 0)
    {
@@ -122,27 +121,25 @@ extern "C" _declspec(dllexport) int Information(char *InfoString)
          CPUInfo[2] = i;
          asm_cpuid(CPUInfo, 0x4);
 
-         FILE *d;
-         fopen_s(&d, "debug.dat", "a");
-         for (size_t j = 0; j < 4; j++)
-            fprintf_s(d, "%x\n", CPUInfo[j]);
-         fprintf_s(d, "\n");
-
          // EAX[4:0] возвращает 0, если КЭШей больше нет.
          if ((CPUInfo[0] & 0x1f) == 0) // EAX[4:0]
             break;
 
-         // КЭШ не третьего уровня нам не интересен.
-         if ((CPUInfo[0] & 0xe0) != 3) // EAX[7:5]
+         // КЭШ НЕ третьего уровня нам не интересен.
+         if ((CPUInfo[0] >> 5 & 0x7) != 3) // EAX[7:5]
             continue;
 
          int L3CacheSize =
-            ((CPUInfo[1] & 0xfff) + 1)         // Line size + 1
-            * ((CPUInfo[1] & 0x3ff000) + 1)    // Partitions + 1
-            * ((CPUInfo[1] & 0xffc00000) + 1)  // Ways + 1
-            * (CPUInfo[2] + 1);                // Sets + 1
+            ((CPUInfo[1] & 0xfff) + 1)         // Line size + 1    EAX[11:0]
+            * ((CPUInfo[1] >> 12 & 0x3ff) + 1) // Partitions + 1   EBX[21:12]
+            * ((CPUInfo[1] >> 22 & 0x3ff) + 1) // Ways + 1         EBX[31:22]
+            * (CPUInfo[2] + 1);                // Sets + 1         ECX[31:0]
+
+         // Байты -> килобайты.
+         L3CacheSize /= 1024;
 
          memcpy(InfoString + sizeof(WORD), &L3CacheSize, sizeof(int));
+         return 0;
       }
 
       // Информация о КЭШе не найдена.
